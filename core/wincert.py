@@ -130,14 +130,16 @@ def list_certificates(store_name="MY"):
                     # some machine certs have nonstandard-length attributes
                     warnings.simplefilter("ignore")
                     parsed = x509.load_der_x509_certificate(der)
+                    subject = _name_cn(parsed.subject)
+                    issuer = _name_cn(parsed.issuer)
             except Exception:
                 logger.exception("Skipping unparseable certificate")
                 continue
 
             certs.append(WinCertificate(
                 der=der,
-                subject=_name_cn(parsed.subject),
-                issuer=_name_cn(parsed.issuer),
+                subject=subject,
+                issuer=issuer,
                 not_before=parsed.not_valid_before_utc,
                 not_after=parsed.not_valid_after_utc,
                 thumbprint=hashlib.sha1(der).hexdigest().upper(),

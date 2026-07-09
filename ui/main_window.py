@@ -4,6 +4,7 @@ signing via Windows-store certificates.
 """
 import logging
 import os
+from datetime import datetime
 
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QLabel, QSpinBox,
@@ -301,8 +302,10 @@ class MainWindow(QMainWindow):
                 return
 
         base, ext = os.path.splitext(tab.path)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Signed PDF", f"{base}_signed{ext}", "PDF Files (*.pdf)")
+            self, "Save Signed PDF", f"{base}_signed_{timestamp}{ext}",
+            "PDF Files (*.pdf)")
         if not output_path:
             return
         if os.path.abspath(output_path) == os.path.abspath(tab.path):

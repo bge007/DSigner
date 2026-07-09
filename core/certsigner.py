@@ -8,10 +8,13 @@ core.wincert, so non-exportable keys and USB tokens work.
 import hashlib
 import logging
 import time
+import warnings
 from datetime import datetime
 
 from asn1crypto import algos
 from asn1crypto import x509 as asn1_x509
+from cryptography import x509 as crypto_x509
+from cryptography.x509.oid import NameOID
 from pyhanko import stamp
 from pyhanko.pdf_utils import text
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
@@ -60,18 +63,40 @@ def sign_pdf_with_certificate(input_pdf, output_pdf, win_cert, page_index,
 
     field_name = f"DSigner-{int(time.time())}"
 
-    lines = [f"Digitally signed by {win_cert.subject}",
-             f"Date: {datetime.now():%Y-%m-%d %H:%M:%S}"]
+    # pull extra visible details from the certificate itself
+    def _attr(name, oid):
+        values = name.get_attributes_for_oid(oid)
+        return values[0].value if values else ""
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        cert = crypto_x509.load_der_x509_certificate(win_cert.der)
+    organization = _attr(cert.subject, NameOID.ORGANIZATION_NAME)
+    email = _attr(cert.subject, NameOID.EMAIL_ADDRESS)
+
+    now = datetime.now().astimezone()
+    tz = now.strftime("%z")
+    signed_at = f"{now:%Y-%m-%d %H:%M:%S} {tz[:3]}:{tz[3:]}" if tz else \
+        f"{now:%Y-%m-%d %H:%M:%S}"
+
+    lines = [f"Digitally signed by {win_cert.subject}"]
+    if organization:
+        lines.append(f"Organization: {organization}")
+    if email:
+        lines.append(f"Email: {email}")
+    lines.append(f"Date: {signed_at}")
     if reason:
         lines.append(f"Reason: {reason}")
     if location:
         lines.append(f"Location: {location}")
+    lines.append(f"Issued by: {win_cert.issuer}")
     # TextStampStyle %-interpolates its text; escape literal percents
     stamp_text = "\n".join(lines).replace("%", "%%")
 
     signer = WindowsCertSigner(win_cert)
     meta = signers.PdfSignatureMetadata(
         field_name=field_name,
+        name=win_cert.subject,
         reason=reason or None,
         location=location or None,
         md_algorithm="sha256",
