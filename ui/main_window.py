@@ -15,8 +15,9 @@ from PyQt5.QtGui import QKeySequence
 
 from ui.document_tab import DocumentTab
 from ui.cert_dialog import CertificateDialog
-from core import session
-from core.certsigner import sign_pdf_with_certificate
+from ui.new_cert_dialog import NewCertificateDialog
+from core import session, wincert
+from core.certsigner import sign_pdf_with_certificate, read_signatures
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +51,13 @@ class MainWindow(QMainWindow):
 
         bar.addStretch()
 
-        self.sign_btn = QPushButton("🔏  Sign && Save…")
-        self.sign_btn.setObjectName("signButton")
-        self.sign_btn.setEnabled(False)
-        self.sign_btn.clicked.connect(self.sign_pdf)
-        bar.addWidget(self.sign_btn)
+        self.sign_mode_btn = QPushButton("🔏  Digital Signature")
+        self.sign_mode_btn.setObjectName("signButton")
+        self.sign_mode_btn.setCheckable(True)
+        self.sign_mode_btn.setToolTip(
+            "Show the digital signature panel and place a signature")
+        self.sign_mode_btn.toggled.connect(self.toggle_sign_pane)
+        bar.addWidget(self.sign_mode_btn)
 
         root.addLayout(bar)
 
@@ -69,7 +72,9 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self.on_tab_changed)
         splitter.addWidget(self.tabs)
 
-        splitter.addWidget(self._build_side_panel())
+        self.sign_pane = self._build_side_panel()
+        self.sign_pane.setVisible(False)  # hidden until Digital Signature mode
+        splitter.addWidget(self.sign_pane)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setSizes([1020, 360])
@@ -78,8 +83,8 @@ class MainWindow(QMainWindow):
         status = QStatusBar()
         self.setStatusBar(status)
         status.showMessage(
-            "Open PDFs (Ctrl+O), search inside them (Ctrl+F), click the page "
-            "to place the signature, then Sign & Save (Ctrl+S).")
+            "Open PDFs (Ctrl+O), search inside them (Ctrl+F). Click "
+            "'Digital Signature' to sign the current document (Ctrl+S).")
 
     def _build_side_panel(self):
         panel = QWidget()
@@ -98,6 +103,10 @@ class MainWindow(QMainWindow):
         cert_btn = QPushButton("Choose from Windows store…")
         cert_btn.clicked.connect(self.choose_certificate)
         cert_layout.addWidget(cert_btn)
+
+        new_cert_btn = QPushButton("Create new certificate…")
+        new_cert_btn.clicked.connect(self.create_certificate)
+        cert_layout.addWidget(new_cert_btn)
 
         layout.addWidget(cert_group)
 
@@ -141,6 +150,23 @@ class MainWindow(QMainWindow):
         pos_form.addRow(hint)
 
         layout.addWidget(pos_group)
+
+        # sign action
+        self.sign_btn = QPushButton("🔏  Sign && Save…")
+        self.sign_btn.setObjectName("signButton")
+        self.sign_btn.setEnabled(False)
+        self.sign_btn.clicked.connect(self.sign_pdf)
+        layout.addWidget(self.sign_btn)
+
+        # existing signatures in the active document
+        sigs_group = QGroupBox("Signatures in this document")
+        sigs_layout = QVBoxLayout(sigs_group)
+        self.signatures_label = QLabel("–")
+        self.signatures_label.setWordWrap(True)
+        self.signatures_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        sigs_layout.addWidget(self.signatures_label)
+        layout.addWidget(sigs_group)
+
         layout.addStretch()
 
         return panel
@@ -156,9 +182,58 @@ class MainWindow(QMainWindow):
     def _init_shortcuts(self):
         QShortcut(QKeySequence.Open, self, self.open_pdfs)
         QShortcut(QKeySequence.Find, self, self._focus_search)
-        QShortcut(QKeySequence("Ctrl+S"), self, self.sign_pdf)
+        QShortcut(QKeySequence("Ctrl+S"), self, self._sign_shortcut)
         QShortcut(QKeySequence("Ctrl+W"), self,
                   lambda: self.close_tab(self.tabs.currentIndex()))
+
+    def _sign_shortcut(self):
+        if not self.sign_mode_btn.isChecked():
+            self.sign_mode_btn.setChecked(True)  # enter signing mode first
+        else:
+            self.sign_pdf()
+
+    # --- signing mode ---
+
+    def toggle_sign_pane(self, checked):
+        self.sign_pane.setVisible(checked)
+        for i in range(self.tabs.count()):
+            self.tabs.widget(i).viewer.set_placement_enabled(checked)
+        if checked:
+            self.on_tab_changed(self.tabs.currentIndex())
+            self.statusBar().showMessage(
+                "Click the page to place the signature box, drag it to "
+                "fine-tune, then Sign & Save.")
+        else:
+            self.statusBar().showMessage("")
+
+    def refresh_signatures(self):
+        if not self.sign_mode_btn.isChecked():
+            return
+        tab = self.current_tab()
+        if not tab:
+            self.signatures_label.setText("No document open.")
+            return
+
+        sigs = read_signatures(tab.path)
+        if not sigs:
+            self.signatures_label.setText(
+                "No digital signatures in this document.")
+            return
+
+        blocks = []
+        for s in sigs:
+            lines = [f"<b>{s['name'] or 'Unknown signer'}</b>"]
+            if s["signed_at"]:
+                lines.append(f"Signed: {s['signed_at']}")
+            if s["reason"]:
+                lines.append(f"Reason: {s['reason']}")
+            if s["location"]:
+                lines.append(f"Location: {s['location']}")
+            cert_bits = s["signer_cn"] or "unknown certificate"
+            lines.append(f"<span style='color:#64748b'>Certificate: "
+                         f"{cert_bits} · field {s['field']}</span>")
+            blocks.append("<br>".join(lines))
+        self.signatures_label.setText("<br><br>".join(blocks))
 
     # --- tabs ---
 
@@ -196,6 +271,7 @@ class MainWindow(QMainWindow):
 
         if self.selected_cert:
             tab.viewer.set_preview_name(self.selected_cert.subject)
+        tab.viewer.set_placement_enabled(self.sign_mode_btn.isChecked())
 
         index = self.tabs.addTab(tab, tab.title)
         self.tabs.setTabToolTip(index, path)
@@ -233,6 +309,7 @@ class MainWindow(QMainWindow):
 
         self.on_page_changed(tab, tab.viewer.current_page,
                              tab.viewer.total_pages)
+        self.refresh_signatures()
 
     def _focus_search(self):
         tab = self.current_tab()
@@ -270,8 +347,24 @@ class MainWindow(QMainWindow):
 
     def choose_certificate(self):
         cert = CertificateDialog.pick(self)
-        if not cert:
+        if cert:
+            self._set_certificate(cert)
+
+    def create_certificate(self):
+        thumbprint = NewCertificateDialog.create(self)
+        if not thumbprint:
             return
+        cert = wincert.find_certificate(thumbprint)
+        if not cert:
+            QMessageBox.warning(self, "Not found",
+                                "The certificate was created but could not "
+                                "be loaded from the store.")
+            return
+        self._set_certificate(cert)
+        self.statusBar().showMessage(
+            f"Certificate '{cert.subject}' created and selected for signing.")
+
+    def _set_certificate(self, cert):
         if self.selected_cert:
             self.selected_cert.free()
         self.selected_cert = cert
@@ -333,10 +426,17 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to sign PDF:\n{e}")
             return
 
+        # show the signed copy in a new tab; the signature details
+        # appear in the "Signatures in this document" panel
+        self.add_document(output_path)
+        self.refresh_signatures()
+        self.statusBar().showMessage(f"Signed PDF saved: {output_path}")
+
         result = QMessageBox.question(
             self, "PDF signed",
-            f"Digitally signed PDF saved to:\n{output_path}\n\nOpen it now?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            f"Digitally signed PDF saved and opened in a new tab:\n"
+            f"{output_path}\n\nAlso open it in your PDF reader?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if result == QMessageBox.Yes:
             os.startfile(output_path)
 

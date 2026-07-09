@@ -35,12 +35,13 @@ class PageView(QWidget):
         self.zoom = 1.0
         self.sig_rect = None          # QRectF, unzoomed image px
         self.preview_name = ""
+        self.placement_enabled = False  # signing mode: show/move the box
         self.highlights = []          # [QRectF], unzoomed image px
         self.current_highlight = -1   # index into highlights
         self._dragging = False
         self._drag_offset = QPointF()
         self.setMouseTracking(True)
-        self.setCursor(Qt.CrossCursor)
+        self.setCursor(Qt.ArrowCursor)
 
     # --- page / zoom ---
 
@@ -89,7 +90,8 @@ class PageView(QWidget):
     # --- interaction ---
 
     def mousePressEvent(self, event):
-        if event.button() != Qt.LeftButton or not self.base_pixmap or not self.sig_rect:
+        if (not self.placement_enabled or event.button() != Qt.LeftButton
+                or not self.base_pixmap or not self.sig_rect):
             return
 
         p = self._to_image(event.pos())
@@ -106,7 +108,7 @@ class PageView(QWidget):
             self.position_changed.emit(self.sig_rect.x(), self.sig_rect.y())
 
     def mouseMoveEvent(self, event):
-        if not self.base_pixmap or not self.sig_rect:
+        if not self.placement_enabled or not self.base_pixmap or not self.sig_rect:
             return
 
         p = self._to_image(event.pos())
@@ -149,8 +151,8 @@ class PageView(QWidget):
                 painter.setBrush(QColor(250, 204, 21, 100))
             painter.drawRect(r)
 
-        # signature box
-        if self.sig_rect:
+        # signature box (only while in signing mode)
+        if self.sig_rect and self.placement_enabled:
             r = self._zoomed(self.sig_rect)
             painter.setPen(QPen(QColor(37, 99, 235), 2, Qt.DashLine))
             painter.setBrush(QColor(37, 99, 235, 40))
@@ -399,6 +401,12 @@ class PDFViewer(QWidget):
             return (612.0, 792.0)
         rect = self.doc[self.current_page].rect
         return (rect.width, rect.height)
+
+    def set_placement_enabled(self, enabled):
+        self.page_view.placement_enabled = enabled
+        self.page_view.setCursor(
+            Qt.CrossCursor if enabled else Qt.ArrowCursor)
+        self.page_view.update()
 
     def set_signature_geometry_pt(self, x, y, w, h):
         self.page_view.set_sig_rect(x * PX_PER_PT, y * PX_PER_PT,

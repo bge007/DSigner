@@ -10,6 +10,7 @@ prompt when required).
 import ctypes
 import hashlib
 import logging
+import subprocess
 import warnings
 from ctypes import wintypes
 from dataclasses import dataclass, field
@@ -150,6 +151,67 @@ def list_certificates(store_name="MY"):
 
     certs.sort(key=lambda c: c.not_after, reverse=True)
     return certs
+
+
+def find_certificate(thumbprint):
+    """Locate a certificate in the store by SHA1 thumbprint."""
+    thumbprint = thumbprint.upper()
+    match = None
+    for cert in list_certificates():
+        if match is None and cert.thumbprint == thumbprint:
+            match = cert
+        else:
+            cert.free()
+    return match
+
+
+def _sanitize_rdn(value):
+    """Strip characters that would break an X.500 RDN or the PS command."""
+    for ch in "\"'`,;=$(){}":
+        value = value.replace(ch, " ")
+    return " ".join(value.split())
+
+
+def create_self_signed(common_name, organization="", email="", years=3):
+    """Create a self-signed document-signing certificate in the
+    CurrentUser store via PowerShell. Returns its SHA1 thumbprint."""
+    cn = _sanitize_rdn(common_name)
+    if not cn:
+        raise ValueError("A name (CN) is required")
+
+    subject = f"CN={cn}"
+    if organization:
+        subject += f", O={_sanitize_rdn(organization)}"
+    if email:
+        subject += f", E={_sanitize_rdn(email)}"
+
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        f"$c = New-SelfSignedCertificate -Subject '{subject}' "
+        "-CertStoreLocation Cert:\\CurrentUser\\My "
+        "-KeyAlgorithm RSA -KeyLength 2048 "
+        "-KeyUsage DigitalSignature, NonRepudiation "
+        "-KeyExportPolicy Exportable "
+        f"-NotAfter (Get-Date).AddYears({int(years)}) "
+        "-Type Custom "
+        "-TextExtension @('2.5.29.37={text}1.2.840.113583.1.1.5'); "
+        "$c.Thumbprint")
+
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True, text=True, timeout=90,
+        creationflags=0x08000000)  # CREATE_NO_WINDOW
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise OSError(f"Certificate creation failed: {detail}")
+
+    lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+    if not lines or len(lines[-1]) != 40:
+        raise OSError(f"Unexpected PowerShell output: {proc.stdout.strip()!r}")
+
+    logger.info("Created self-signed certificate %s (%s)", subject, lines[-1])
+    return lines[-1]
 
 
 def sign_digest(win_cert, digest, digest_algorithm="sha256"):

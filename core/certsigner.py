@@ -119,3 +119,45 @@ def sign_pdf_with_certificate(input_pdf, output_pdf, win_cert, page_index,
 
     logger.info("Signed %s -> %s (field %s, page %d)",
                 input_pdf, output_pdf, field_name, page_index + 1)
+
+
+def _pdf_date_to_text(value):
+    """'D:20260709142824+05'30'' -> '2026-07-09 14:28:24 +05:30'."""
+    s = str(value or "")
+    if not s.startswith("D:") or len(s) < 16:
+        return s
+    out = f"{s[2:6]}-{s[6:8]}-{s[8:10]} {s[10:12]}:{s[12:14]}:{s[14:16]}"
+    if len(s) >= 22 and s[16] in "+-":
+        out += f" {s[16:19]}:{s[20:22]}"
+    return out
+
+
+def read_signatures(pdf_path):
+    """Details of the digital signatures embedded in a PDF (for display)."""
+    from pyhanko.pdf_utils.reader import PdfFileReader
+
+    results = []
+    try:
+        with open(pdf_path, "rb") as f:
+            reader = PdfFileReader(f, strict=False)
+            for sig in reader.embedded_signatures:
+                obj = sig.sig_object
+                signer_cn = ""
+                try:
+                    subject = sig.signer_cert.subject.native
+                    signer_cn = (subject.get("common_name")
+                                 or subject.get("organization_name", ""))
+                except Exception:
+                    logger.debug("No parseable signer cert in %s",
+                                 sig.field_name, exc_info=True)
+                results.append({
+                    "field": sig.field_name,
+                    "name": str(obj.get("/Name", "") or "") or signer_cn,
+                    "signer_cn": signer_cn,
+                    "signed_at": _pdf_date_to_text(obj.get("/M")),
+                    "reason": str(obj.get("/Reason", "") or ""),
+                    "location": str(obj.get("/Location", "") or ""),
+                })
+    except Exception:
+        logger.exception("Failed to read signatures from %s", pdf_path)
+    return results

@@ -53,6 +53,7 @@ QPushButton#signButton {
     padding: 8px 18px;
 }
 QPushButton#signButton:hover { background: #15803d; }
+QPushButton#signButton:checked { background: #166534; }
 QPushButton#signButton:disabled { background: #b7dfc5; color: #f0fdf4; }
 QLineEdit, QSpinBox {
     background: white;
