@@ -148,7 +148,10 @@ class PageView(QWidget):
 
             if r.height() >= 18 and r.width() >= 60:
                 painter.setPen(QColor(30, 64, 175))
-                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+                font = QFont()
+                font.setPointSize(8)
+                font.setBold(True)
+                painter.setFont(font)
                 label = self.preview_name.strip() or "Signature"
                 painter.drawText(r.adjusted(8, 5, -8, -5),
                                  Qt.AlignTop | Qt.AlignLeft, label)

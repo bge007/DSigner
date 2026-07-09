@@ -100,13 +100,16 @@ class DigitalSigner:
                               f"Location: {location}"))
 
             text_y = y + h - pad - name_size
-            for font, font_size, color, text in lines:
+            for font_name, font_size, color, text in lines:
                 if text_y < y + 2:
                     break
                 max_w = w - 2 * pad
-                while len(text) > 1 and can.stringWidth(text, font, font_size) > max_w:
+                while len(text) > 1 and can.stringWidth(text, font_name, font_size) > max_w:
                     text = text[:-2] + "…"
-                can.setFont(font, font_size)
+                try:
+                    can.setFont(font_name, font_size)
+                except:
+                    can.setFont("Helvetica", font_size)
                 can.setFillColorRGB(*color)
                 can.drawString(x + pad, text_y, text)
                 text_y -= font_size + 3

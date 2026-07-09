@@ -2,15 +2,18 @@
 PDF Digital Signer - Main Application Entry Point
 """
 import sys
+import os
 from PyQt5.QtWidgets import QApplication
 from core.logging_setup import setup_logging
 from ui.main_window import MainWindow
+
+os.environ["QT_QPA_FONTDIR"] = ""
 
 APP_STYLE = """
 QMainWindow, QWidget {
     background: #f4f6fb;
     color: #1e293b;
-    font-family: 'Segoe UI';
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
     font-size: 10pt;
 }
 QGroupBox {
