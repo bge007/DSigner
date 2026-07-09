@@ -1,4 +1,4 @@
-# PDF Digital Signer
+# DSigner
 
 A professional digital signing application for PDF documents with a visual interface for selecting signature position.
 

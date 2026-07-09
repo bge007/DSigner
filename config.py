@@ -2,7 +2,7 @@
 Application configuration
 """
 
-APP_NAME = "PDF Digital Signer"
+APP_NAME = "DSigner"
 APP_VERSION = "1.0.0"
 
 WINDOW_WIDTH = 1400

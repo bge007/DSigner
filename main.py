@@ -1,5 +1,5 @@
 """
-PDF Digital Signer - Main Application Entry Point
+DSigner - Main Application Entry Point
 """
 import sys
 import os

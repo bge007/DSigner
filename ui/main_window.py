@@ -1,5 +1,5 @@
 """
-Main application window for PDF Digital Signer
+Main application window for DSigner
 """
 import logging
 import os
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PDF Digital Signer")
+        self.setWindowTitle("DSigner")
         self.resize(1400, 860)
 
         self.current_pdf_path = None

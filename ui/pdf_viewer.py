@@ -1,6 +1,6 @@
 """
-PDF Viewer widget with interactive signature placement:
-click to place, drag to fine-tune, page navigation and zoom.
+PDF Viewer widget with interactive signature placement.
+Click to place, drag to fine-tune, page navigation and zoom.
 """
 import logging
 import os

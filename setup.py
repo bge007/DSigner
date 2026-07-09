@@ -1,5 +1,5 @@
 """
-Setup script for PDF Digital Signer application
+Setup script for DSigner application
 """
 import os
 import sys
