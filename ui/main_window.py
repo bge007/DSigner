@@ -1,5 +1,6 @@
 """
-Main application window for DSigner
+Main application window for DSigner: tabbed PDF viewer with digital
+signing via Windows-store certificates.
 """
 import logging
 import os
@@ -7,11 +8,14 @@ import os
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QLabel, QSpinBox,
                              QGroupBox, QFormLayout, QMessageBox, QSplitter,
-                             QLineEdit, QCheckBox, QStatusBar)
+                             QLineEdit, QStatusBar, QTabWidget, QShortcut)
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QKeySequence
 
-from ui.pdf_viewer import PDFViewer
-from core.signer import DigitalSigner
+from ui.document_tab import DocumentTab
+from ui.cert_dialog import CertificateDialog
+from core import session
+from core.certsigner import sign_pdf_with_certificate
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +24,13 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("DSigner")
-        self.resize(1400, 860)
+        self.resize(1400, 880)
 
-        self.current_pdf_path = None
-        self.signer = DigitalSigner()
+        self.selected_cert = None
         self._syncing = False  # guards spinbox <-> viewer feedback loops
 
         self.init_ui()
+        self._init_shortcuts()
 
     def init_ui(self):
         central = QWidget()
@@ -40,12 +44,9 @@ class MainWindow(QMainWindow):
 
         self.open_btn = QPushButton("📂  Open PDF…")
         self.open_btn.setObjectName("primaryButton")
-        self.open_btn.clicked.connect(self.open_pdf)
+        self.open_btn.clicked.connect(self.open_pdfs)
         bar.addWidget(self.open_btn)
 
-        self.file_label = QLabel("No document loaded")
-        self.file_label.setObjectName("fileLabel")
-        bar.addWidget(self.file_label)
         bar.addStretch()
 
         self.sign_btn = QPushButton("🔏  Sign && Save…")
@@ -56,13 +57,16 @@ class MainWindow(QMainWindow):
 
         root.addLayout(bar)
 
-        # main split: viewer | side panel
+        # main split: tabs | side panel
         splitter = QSplitter(Qt.Horizontal)
 
-        self.pdf_viewer = PDFViewer()
-        self.pdf_viewer.position_changed.connect(self.on_position_changed)
-        self.pdf_viewer.page_changed.connect(self.on_page_changed)
-        splitter.addWidget(self.pdf_viewer)
+        self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(True)
+        self.tabs.setMovable(True)
+        self.tabs.setDocumentMode(True)
+        self.tabs.tabCloseRequested.connect(self.close_tab)
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+        splitter.addWidget(self.tabs)
 
         splitter.addWidget(self._build_side_panel())
         splitter.setStretchFactor(0, 1)
@@ -73,7 +77,8 @@ class MainWindow(QMainWindow):
         status = QStatusBar()
         self.setStatusBar(status)
         status.showMessage(
-            "Open a PDF, then click anywhere on the page to place the signature — drag the box to fine-tune.")
+            "Open PDFs (Ctrl+O), search inside them (Ctrl+F), click the page "
+            "to place the signature, then Sign & Save (Ctrl+S).")
 
     def _build_side_panel(self):
         panel = QWidget()
@@ -81,14 +86,23 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(4, 0, 0, 0)
         layout.setSpacing(10)
 
-        # signer details
-        sig_group = QGroupBox("Signer Details")
-        sig_form = QFormLayout(sig_group)
+        # certificate
+        cert_group = QGroupBox("Signing Certificate")
+        cert_layout = QVBoxLayout(cert_group)
 
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("e.g. Ben George")
-        self.name_input.textChanged.connect(self.pdf_viewer.set_preview_name)
-        sig_form.addRow("Name*", self.name_input)
+        self.cert_label = QLabel("No certificate selected")
+        self.cert_label.setWordWrap(True)
+        cert_layout.addWidget(self.cert_label)
+
+        cert_btn = QPushButton("Choose from Windows store…")
+        cert_btn.clicked.connect(self.choose_certificate)
+        cert_layout.addWidget(cert_btn)
+
+        layout.addWidget(cert_group)
+
+        # signature details
+        sig_group = QGroupBox("Signature Details")
+        sig_form = QFormLayout(sig_group)
 
         self.reason_input = QLineEdit()
         self.reason_input.setPlaceholderText("e.g. Approved (optional)")
@@ -98,17 +112,13 @@ class MainWindow(QMainWindow):
         self.location_input.setPlaceholderText("e.g. Bangalore (optional)")
         sig_form.addRow("Location", self.location_input)
 
-        self.date_check = QCheckBox("Include date && time")
-        self.date_check.setChecked(True)
-        sig_form.addRow("", self.date_check)
-
         layout.addWidget(sig_group)
 
         # placement
         pos_group = QGroupBox("Placement")
         pos_form = QFormLayout(pos_group)
 
-        self.page_info = QLabel("Load a PDF to begin")
+        self.page_info = QLabel("Open a PDF to begin")
         self.page_info.setWordWrap(True)
         pos_form.addRow(self.page_info)
 
@@ -123,7 +133,8 @@ class MainWindow(QMainWindow):
         pos_form.addRow("Height", self.sig_height)
 
         hint = QLabel("Values are in PDF points (72 pt = 1 inch). "
-                      "Click or drag the box on the page instead of typing.")
+                      "Click or drag the box on the page instead of typing. "
+                      "The signature goes on the page currently shown.")
         hint.setObjectName("hintLabel")
         hint.setWordWrap(True)
         pos_form.addRow(hint)
@@ -138,98 +149,219 @@ class MainWindow(QMainWindow):
         spin.setRange(lo, hi)
         spin.setValue(value)
         spin.setSuffix(" pt")
-        spin.valueChanged.connect(self._push_geometry_to_viewer)
+        spin.valueChanged.connect(self._push_geometry_to_tab)
         return spin
+
+    def _init_shortcuts(self):
+        QShortcut(QKeySequence.Open, self, self.open_pdfs)
+        QShortcut(QKeySequence.Find, self, self._focus_search)
+        QShortcut(QKeySequence("Ctrl+S"), self, self.sign_pdf)
+        QShortcut(QKeySequence("Ctrl+W"), self,
+                  lambda: self.close_tab(self.tabs.currentIndex()))
+
+    # --- tabs ---
+
+    def current_tab(self):
+        return self.tabs.currentWidget()
+
+    def add_document(self, path, page=0, zoom=None, sig_geometry=None):
+        # already open? just activate it
+        for i in range(self.tabs.count()):
+            if self.tabs.widget(i).path == path:
+                self.tabs.setCurrentIndex(i)
+                return
+
+        try:
+            tab = DocumentTab(path)
+        except Exception as e:
+            logger.exception(f"Failed to open PDF: {path}")
+            QMessageBox.critical(self, "Error", f"Failed to open PDF:\n{e}")
+            return
+
+        if sig_geometry:
+            tab.sig_geometry = dict(sig_geometry)
+        else:
+            # default placement: bottom-right corner of the first page
+            page_w, page_h = tab.viewer.page_size_pt()
+            w, h = self.sig_width.value(), self.sig_height.value()
+            tab.sig_geometry = {"x": max(0, round(page_w - w - 36)),
+                                "y": max(0, round(page_h - h - 36)),
+                                "w": w, "h": h}
+
+        tab.viewer.position_changed.connect(
+            lambda x, y, t=tab: self.on_position_changed(t, x, y))
+        tab.viewer.page_changed.connect(
+            lambda cur, tot, t=tab: self.on_page_changed(t, cur, tot))
+
+        if self.selected_cert:
+            tab.viewer.set_preview_name(self.selected_cert.subject)
+
+        index = self.tabs.addTab(tab, tab.title)
+        self.tabs.setTabToolTip(index, path)
+        self.tabs.setCurrentIndex(index)
+
+        if page:
+            tab.viewer.show_page(page)
+        if zoom:
+            tab.viewer.set_zoom(zoom)
+
+    def close_tab(self, index):
+        tab = self.tabs.widget(index)
+        if tab:
+            tab.close_doc()
+            self.tabs.removeTab(index)
+            tab.deleteLater()
+        if self.tabs.count() == 0:
+            self.sign_btn.setEnabled(False)
+            self.page_info.setText("Open a PDF to begin")
+
+    def on_tab_changed(self, index):
+        tab = self.tabs.widget(index)
+        if not tab:
+            return
+        self.sign_btn.setEnabled(True)
+
+        g = tab.sig_geometry
+        self._syncing = True
+        self.pos_x.setValue(round(g["x"]))
+        self.pos_y.setValue(round(g["y"]))
+        self.sig_width.setValue(round(g["w"]))
+        self.sig_height.setValue(round(g["h"]))
+        self._syncing = False
+        tab.viewer.set_signature_geometry_pt(g["x"], g["y"], g["w"], g["h"])
+
+        self.on_page_changed(tab, tab.viewer.current_page,
+                             tab.viewer.total_pages)
+
+    def _focus_search(self):
+        tab = self.current_tab()
+        if tab:
+            tab.focus_search()
 
     # --- geometry sync ---
 
-    def _push_geometry_to_viewer(self):
-        if self._syncing or not self.current_pdf_path:
+    def _push_geometry_to_tab(self):
+        if self._syncing:
             return
-        self.pdf_viewer.set_signature_geometry_pt(
-            self.pos_x.value(), self.pos_y.value(),
-            self.sig_width.value(), self.sig_height.value())
+        tab = self.current_tab()
+        if not tab:
+            return
+        g = {"x": self.pos_x.value(), "y": self.pos_y.value(),
+             "w": self.sig_width.value(), "h": self.sig_height.value()}
+        tab.sig_geometry = g
+        tab.viewer.set_signature_geometry_pt(g["x"], g["y"], g["w"], g["h"])
 
-    def on_position_changed(self, x_pt, y_pt):
-        self._syncing = True
-        self.pos_x.setValue(round(x_pt))
-        self.pos_y.setValue(round(y_pt))
-        self._syncing = False
+    def on_position_changed(self, tab, x_pt, y_pt):
+        tab.sig_geometry["x"] = x_pt
+        tab.sig_geometry["y"] = y_pt
+        if tab is self.current_tab():
+            self._syncing = True
+            self.pos_x.setValue(round(x_pt))
+            self.pos_y.setValue(round(y_pt))
+            self._syncing = False
 
-    def on_page_changed(self, current, total):
-        self.page_info.setText(
-            f"Signature will be placed on page {current + 1} of {total} "
-            f"(the page shown in the viewer).")
+    def on_page_changed(self, tab, current, total):
+        if tab is self.current_tab():
+            self.page_info.setText(
+                f"Signature will be placed on page {current + 1} of {total}.")
+
+    # --- certificate ---
+
+    def choose_certificate(self):
+        cert = CertificateDialog.pick(self)
+        if not cert:
+            return
+        if self.selected_cert:
+            self.selected_cert.free()
+        self.selected_cert = cert
+        self.cert_label.setText(
+            f"<b>{cert.subject}</b><br>"
+            f"Issued by {cert.issuer}<br>"
+            f"Expires {cert.not_after:%Y-%m-%d}")
+        for i in range(self.tabs.count()):
+            self.tabs.widget(i).viewer.set_preview_name(cert.subject)
 
     # --- actions ---
 
-    def open_pdf(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open PDF File", "", "PDF Files (*.pdf)")
-        if not file_path:
-            return
-
-        try:
-            self.pdf_viewer.load_pdf(file_path)
-        except Exception as e:
-            logger.exception(f"Failed to load PDF: {file_path}")
-            QMessageBox.critical(self, "Error", f"Failed to load PDF:\n{e}")
-            return
-
-        self.current_pdf_path = file_path
-        self.file_label.setText(os.path.basename(file_path))
-        self.sign_btn.setEnabled(True)
-
-        # default placement: bottom-right corner of the page
-        page_w, page_h = self.pdf_viewer.page_size_pt()
-        w, h = self.sig_width.value(), self.sig_height.value()
-        self._syncing = True
-        self.pos_x.setValue(max(0, round(page_w - w - 36)))
-        self.pos_y.setValue(max(0, round(page_h - h - 36)))
-        self._syncing = False
-        self._push_geometry_to_viewer()
-        self.pdf_viewer.set_preview_name(self.name_input.text())
-
-        self.statusBar().showMessage(
-            "Click anywhere on the page to move the signature box, or drag it to fine-tune.")
+    def open_pdfs(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Open PDF Files", "", "PDF Files (*.pdf)")
+        for path in paths:
+            self.add_document(path)
 
     def sign_pdf(self):
-        if not self.current_pdf_path:
+        tab = self.current_tab()
+        if not tab:
             QMessageBox.warning(self, "No document", "Please open a PDF first.")
             return
 
-        signer_name = self.name_input.text().strip()
-        if not signer_name:
-            QMessageBox.warning(self, "Missing name", "Please enter the signer name.")
-            self.name_input.setFocus()
-            return
+        if not self.selected_cert:
+            self.choose_certificate()
+            if not self.selected_cert:
+                return
 
-        base, ext = os.path.splitext(self.current_pdf_path)
+        base, ext = os.path.splitext(tab.path)
         output_path, _ = QFileDialog.getSaveFileName(
             self, "Save Signed PDF", f"{base}_signed{ext}", "PDF Files (*.pdf)")
         if not output_path:
             return
+        if os.path.abspath(output_path) == os.path.abspath(tab.path):
+            QMessageBox.warning(self, "Choose another file",
+                                "Cannot overwrite the open document; "
+                                "pick a different output name.")
+            return
 
+        g = tab.sig_geometry
+        _, page_h = tab.viewer.page_size_pt()
         try:
-            self.signer.sign_pdf(
-                input_pdf=self.current_pdf_path,
+            sign_pdf_with_certificate(
+                input_pdf=tab.path,
                 output_pdf=output_path,
-                page_index=self.pdf_viewer.current_page,
-                position_pt=(self.pos_x.value(), self.pos_y.value()),
-                size_pt=(self.sig_width.value(), self.sig_height.value()),
-                signer_name=signer_name,
+                win_cert=self.selected_cert,
+                page_index=tab.viewer.current_page,
+                position_pt=(g["x"], g["y"]),
+                size_pt=(g["w"], g["h"]),
+                page_height_pt=page_h,
                 reason=self.reason_input.text().strip(),
                 location=self.location_input.text().strip(),
-                include_date=self.date_check.isChecked(),
             )
         except Exception as e:
-            logger.exception(f"Failed to sign PDF: {self.current_pdf_path}")
+            logger.exception(f"Failed to sign PDF: {tab.path}")
             QMessageBox.critical(self, "Error", f"Failed to sign PDF:\n{e}")
             return
 
         result = QMessageBox.question(
             self, "PDF signed",
-            f"Signed PDF saved to:\n{output_path}\n\nOpen it now?",
+            f"Digitally signed PDF saved to:\n{output_path}\n\nOpen it now?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if result == QMessageBox.Yes:
             os.startfile(output_path)
+
+    # --- session ---
+
+    def restore_session(self):
+        data = session.load_session()
+        if not data:
+            return
+        for entry in data.get("files", []):
+            path = entry.get("path", "")
+            if os.path.exists(path):
+                self.add_document(path,
+                                  page=entry.get("page", 0),
+                                  zoom=entry.get("zoom"),
+                                  sig_geometry=entry.get("sig_geometry"))
+        active = data.get("active", 0)
+        if 0 <= active < self.tabs.count():
+            self.tabs.setCurrentIndex(active)
+
+    def closeEvent(self, event):
+        files = [self.tabs.widget(i).session_state()
+                 for i in range(self.tabs.count())]
+        session.save_session({
+            "version": 1,
+            "active": self.tabs.currentIndex(),
+            "files": files,
+        })
+        for i in range(self.tabs.count()):
+            self.tabs.widget(i).close_doc()
+        super().closeEvent(event)

@@ -70,6 +70,32 @@ QScrollArea {
 }
 QScrollArea > QWidget > QWidget { background: #e2e8f0; }
 QStatusBar { color: #475569; }
+QTabWidget::pane { border: none; }
+QTabBar::tab {
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
+    border-bottom: none;
+    padding: 6px 14px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    margin-right: 2px;
+    color: #475569;
+}
+QTabBar::tab:selected { background: white; color: #1e293b; font-weight: 600; }
+QTabBar::tab:hover:!selected { background: #cbd5e1; }
+QTableWidget {
+    background: white;
+    border: 1px solid #dbe2ef;
+    border-radius: 6px;
+    gridline-color: #eef2f7;
+}
+QHeaderView::section {
+    background: #eef2f7;
+    border: none;
+    border-bottom: 1px solid #dbe2ef;
+    padding: 5px 8px;
+    font-weight: 600;
+}
 """
 
 
@@ -80,6 +106,7 @@ def main():
     app.setStyleSheet(APP_STYLE)
     window = MainWindow()
     window.show()
+    window.restore_session()
     sys.exit(app.exec_())
 
 
