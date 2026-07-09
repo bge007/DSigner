@@ -5,7 +5,21 @@ import logging
 import os
 import sys
 
-LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "error.log")
+
+def _log_file():
+    if getattr(sys, "frozen", False):
+        # packaged exe: __file__ lives in a temp extraction dir,
+        # so log next to the session file instead
+        base = os.path.join(
+            os.getenv("LOCALAPPDATA", os.path.expanduser("~")), "DSigner")
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, "error.log")
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "error.log")
+
+
+LOG_FILE = _log_file()
 
 
 def setup_logging():

@@ -43,3 +43,8 @@ temp/
 # Logs
 *.log
 error.log
+
+# PyInstaller
+build/
+dist/
+*.spec

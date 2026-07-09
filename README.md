@@ -78,6 +78,26 @@ certificate's chain: certificates issued by a licensed CA validate cleanly;
 self-signed test certificates show as valid-but-untrusted unless the
 certificate is added as a trust anchor.
 
+## Portable executable
+
+Build a single-file `DSigner.exe` that runs on other Windows machines with
+no Python installation:
+
+```powershell
+.\build_exe.bat        # output: dist\DSigner.exe
+```
+
+Copy `dist\DSigner.exe` anywhere (USB stick, another PC) and run it.
+Notes:
+
+- First launch takes a few seconds — the single file unpacks itself to a
+  temp folder.
+- Session and error log live in `%LOCALAPPDATA%\DSigner\` on each machine.
+- Signing certificates come from *that machine's* Windows store — take
+  your certificate (or USB token) with you, or create one in-app.
+- Windows SmartScreen may warn on unsigned executables; choose
+  "More info → Run anyway", or sign the exe with a code-signing cert.
+
 ## Session & logs
 
 - Session file: `%LOCALAPPDATA%\DSigner\session.json`
