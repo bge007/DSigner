@@ -118,7 +118,7 @@ def sign_pdf_with_certificate(input_pdf, output_pdf, win_cert, page_index,
         border_width=1,
         text_box_style=text.TextBoxStyle(font_size=8),
         background=background,
-        background_opacity=0.30,
+        background_opacity=0.50,
     )
     pdf_signer = signers.PdfSigner(
         meta, signer=signer, stamp_style=style,

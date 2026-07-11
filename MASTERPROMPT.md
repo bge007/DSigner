@@ -1,4 +1,4 @@
-# DSigner — Master Prompt (7 Steps)
+# DSigner — Master Prompt (8 Steps)
 
 A sequence of prompts that rebuilds this project from an empty folder.
 Feed them to an AI coding agent (or follow them yourself) one at a time —
@@ -41,7 +41,12 @@ leave the page; errors land in `error.log`.
 > a jump-to-page spinbox with "/ N" total, zoom in/out with percentage
 > label, **Fit width** and **Fit page**; support **Ctrl+Scroll** zooming
 > anchored at the cursor position, plus **Ctrl +/−** and **Ctrl+0**
-> (fit width) shortcuts, clamped to 25%–300%. Add **text search**: a search box
+> (fit width) shortcuts, clamped to 25%–300%. Add **text selection**:
+> dragging over the page in reading mode selects words (PyMuPDF
+> `get_text("words")` boxes, highlighted individually, I-beam cursor over
+> text), assembled in reading order; Ctrl+C or a right-click menu copies
+> the selection, and the menu also offers copying the full page text.
+> Add **text search**: a search box
 > (Ctrl+F) that finds every match across all pages using PyMuPDF's
 > `search_for` rectangles; highlight all matches on the visible page in
 > yellow with the current match emphasized in orange; Enter/▼ and ▲ cycle
@@ -170,6 +175,34 @@ dialog immediately signs successfully.
 light logo behind the text; clicking a signature on the page opens the
 inspector with a correct intact/modified verdict and a copyable public
 key; the exe runs on a machine without Python.
+
+---
+
+## Step 8 — Application shell, metadata, and document utilities
+
+> Add release metadata (`APP_VERSION`, publisher, organiser, license,
+> description) in a single module and surface it in the app title, About
+> dialog, and generated executable name. Add an MIT `LICENSE` file. Add a
+> File menu with Open, Close, Save As, Fill Form, Properties, and Exit, plus
+> a Help menu with About. The About dialog must show app details, organiser
+> "Benoy George", version, and the MIT license text. The Properties dialog
+> must show file path, size, timestamps, page count, PDF metadata,
+> encryption status, and unsaved-change status. Add rotate-left and
+> rotate-right controls next to the page navigator; rotations are applied
+> to the current in-memory PDF and can be persisted through Save As. Build
+> output should be named `DSigner_v{version}_YYYYMMDD_HHMMSS.exe`. Add a
+> practical form-filling dialog that lists non-signature PDF widgets, lets
+> users edit values, applies widget updates in-memory, and directs users to
+> Save As for sharing. Add Ctrl+Alt+Click object inspection in the viewer:
+> highlight the detected visible object and show the best available xref
+> details for widgets, annotations, images, text blocks, drawings, or the
+> page/content stream.
+
+**Accept when:** version metadata is visible in the window/About dialog and
+exe filename; File menu commands work; Properties shows real PDF metadata;
+page rotations render immediately and survive Save As; form fields can be
+edited and saved to a copy; Ctrl+Alt+Click highlights and identifies visible
+PDF objects; the license text is included in the repo and About dialog.
 
 ---
 

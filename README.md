@@ -12,8 +12,15 @@ validates.
 - **Session restore** — reopens your files, pages, zoom and signature placement on next launch
 - **Text search** — find matches across all pages with highlights and next/previous navigation
 - **Page controls** — page jump, previous/next, fit width, fit page
+- **Page rotation** — rotate the current page left or right, then save a copy
 - **Zoom** — toolbar buttons, **Ctrl+Scroll** (zooms at the cursor),
   **Ctrl +/−** keyboard shortcuts, **Ctrl+0** for fit width (25%–300%)
+- **Text selection & copy** — drag over text in reading mode to select it
+  (word-accurate highlight, I-beam cursor), then **Ctrl+C** or right-click →
+  Copy; the context menu can also copy the whole page's text
+- **Object inspector** — Ctrl+Alt+Click visible PDF content to inspect the
+  best matching widget, annotation, image, text block, drawing, or page object
+- **Form filling** — edit fillable PDF form fields and save a shareable copy
 - **Interactive placement** — click the page to place the signature box, drag to fine-tune
 - **Real digital signatures** — pick a certificate from the Windows store
   (Current User → Personal); signing happens inside Windows CNG, so
@@ -25,6 +32,8 @@ validates.
 - **Signature inspector** — click any signature on the page to review it:
   integrity check (intact / modified), certificate subject, issuer, serial,
   validity, SHA-256 fingerprint, key type and the public key as copyable PEM
+- **File properties** — view path, size, page count, PDF metadata,
+  encryption, and unsaved-change status from the File menu
 
 ## Project Structure
 
@@ -62,11 +71,13 @@ No poppler or other external binaries required.
 
 1. **Open PDF(s)** (`Ctrl+O`) — multi-select works; each file opens in a tab
 2. **Search** (`Ctrl+F`) — type and press Enter; Enter again / ▲▼ to move between matches
-3. **Place the signature** — click anywhere on the page to move the box there,
+3. **Inspect or fill** — use Ctrl+Alt+Click to inspect visible PDF objects,
+   or File → Fill Form to edit form fields
+4. **Place the signature** — click anywhere on the page to move the box there,
    drag it to fine-tune, or use the X/Y/W/H fields; the box stays per-document
-4. **Choose certificate** — pick from your Windows store; the selection is
+5. **Choose certificate** — pick from your Windows store; the selection is
    reused for every signature this session
-5. **Sign & Save** (`Ctrl+S`) — the signature is applied to the page currently
+6. **Sign & Save** (`Ctrl+S`) — the signature is applied to the page currently
    shown, saved as `<name>_signed.pdf` by default
 
 Closing the app saves the session; the next launch reopens the same documents.
@@ -86,14 +97,14 @@ certificate is added as a trust anchor.
 
 ## Portable executable
 
-Build a single-file `DSigner.exe` that runs on other Windows machines with
-no Python installation:
+Build a timestamped, versioned single-file executable that runs on other
+Windows machines with no Python installation:
 
 ```powershell
-.\build_exe.bat        # output: dist\DSigner.exe
+.\build_exe.bat        # output: dist\DSigner_v0.2.0_YYYYMMDD_HHMMSS.exe
 ```
 
-Copy `dist\DSigner.exe` anywhere (USB stick, another PC) and run it.
+Copy the generated exe from `dist\` anywhere (USB stick, another PC) and run it.
 Notes:
 
 - First launch takes a few seconds — the single file unpacks itself to a

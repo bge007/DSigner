@@ -9,13 +9,19 @@ from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QFileDialog, QLabel, QSpinBox,
                              QGroupBox, QFormLayout, QMessageBox, QSplitter,
-                             QLineEdit, QStatusBar, QTabWidget, QShortcut)
+                             QLineEdit, QStatusBar, QTabWidget, QShortcut,
+                             QAction)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QKeySequence
 
+from core.app_info import APP_NAME, APP_VERSION
 from ui.document_tab import DocumentTab
+from ui.about_dialog import AboutDialog
 from ui.cert_dialog import CertificateDialog
+from ui.form_dialog import FormFillDialog
 from ui.new_cert_dialog import NewCertificateDialog
+from ui.object_inspector_dialog import ObjectInspectorDialog
+from ui.properties_dialog import PropertiesDialog
 from ui.sig_details_dialog import SignatureDetailsDialog
 from core import session, wincert
 from core.certsigner import (sign_pdf_with_certificate, read_signatures,
@@ -27,14 +33,52 @@ logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DSigner")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1400, 880)
 
         self.selected_cert = None
         self._syncing = False  # guards spinbox <-> viewer feedback loops
 
         self.init_ui()
+        self._init_menu()
         self._init_shortcuts()
+
+    def _init_menu(self):
+        file_menu = self.menuBar().addMenu("&File")
+
+        open_action = QAction("&Open...", self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.triggered.connect(self.open_pdfs)
+        file_menu.addAction(open_action)
+
+        close_action = QAction("&Close", self)
+        close_action.setShortcut(QKeySequence.Close)
+        close_action.triggered.connect(lambda: self.close_tab(self.tabs.currentIndex()))
+        file_menu.addAction(close_action)
+
+        save_as_action = QAction("Save &As...", self)
+        save_as_action.setShortcut(QKeySequence.SaveAs)
+        save_as_action.triggered.connect(self.save_current_as)
+        file_menu.addAction(save_as_action)
+
+        fill_form_action = QAction("&Fill Form...", self)
+        fill_form_action.triggered.connect(self.fill_current_form)
+        file_menu.addAction(fill_form_action)
+
+        properties_action = QAction("&Properties...", self)
+        properties_action.setShortcut("Alt+Enter")
+        properties_action.triggered.connect(self.show_file_properties)
+        file_menu.addAction(properties_action)
+
+        file_menu.addSeparator()
+        exit_action = QAction("E&xit", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        help_menu = self.menuBar().addMenu("&Help")
+        about_action = QAction(f"&About {APP_NAME}", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
 
     def init_ui(self):
         central = QWidget()
@@ -286,6 +330,7 @@ class MainWindow(QMainWindow):
             lambda cur, tot, t=tab: self.on_page_changed(t, cur, tot))
         tab.viewer.signature_clicked.connect(
             lambda field, t=tab: self.show_signature_details(t, field))
+        tab.viewer.object_inspected.connect(self.show_object_details)
 
         if self.selected_cert:
             tab.viewer.set_preview_name(self.selected_cert.subject)
@@ -301,6 +346,8 @@ class MainWindow(QMainWindow):
             tab.viewer.set_zoom(zoom)
 
     def close_tab(self, index):
+        if not (0 <= index < self.tabs.count()):
+            return
         tab = self.tabs.widget(index)
         if tab:
             tab.close_doc()
@@ -343,6 +390,20 @@ class MainWindow(QMainWindow):
             return
         SignatureDetailsDialog(details, current_field=field_name,
                                parent=self).exec_()
+
+    def show_file_properties(self):
+        tab = self.current_tab()
+        if not tab:
+            QMessageBox.information(self, "No document",
+                                    "Please open a PDF first.")
+            return
+        PropertiesDialog(tab, self).exec_()
+
+    def show_about(self):
+        AboutDialog(self).exec_()
+
+    def show_object_details(self, details):
+        ObjectInspectorDialog(details, self).exec_()
 
     # --- geometry sync ---
 
@@ -410,6 +471,64 @@ class MainWindow(QMainWindow):
             self, "Open PDF Files", "", "PDF Files (*.pdf)")
         for path in paths:
             self.add_document(path)
+
+    def save_current_as(self):
+        tab = self.current_tab()
+        if not tab:
+            QMessageBox.warning(self, "No document", "Please open a PDF first.")
+            return
+
+        base, ext = os.path.splitext(tab.path)
+        default_path = f"{base}_copy{ext or '.pdf'}"
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, "Save PDF As", default_path, "PDF Files (*.pdf)")
+        if not output_path:
+            return
+        if os.path.abspath(output_path) == os.path.abspath(tab.path):
+            QMessageBox.warning(self, "Choose another file",
+                                "Cannot overwrite the open document; "
+                                "pick a different output name.")
+            return
+
+        try:
+            tab.viewer.save_as(output_path)
+        except Exception as e:
+            logger.exception("Failed to save PDF as %s", output_path)
+            QMessageBox.critical(self, "Error", f"Failed to save PDF:\n{e}")
+            return
+
+        self.add_document(output_path)
+        self.statusBar().showMessage(f"Saved PDF copy: {output_path}")
+
+    def fill_current_form(self):
+        tab = self.current_tab()
+        if not tab:
+            QMessageBox.warning(self, "No document", "Please open a PDF first.")
+            return
+
+        fields = tab.viewer.form_fields()
+        if not fields:
+            QMessageBox.information(self, "No form fields",
+                                    "This PDF does not contain fillable form "
+                                    "fields.")
+            return
+
+        dlg = FormFillDialog(fields, self)
+        if dlg.exec_() != dlg.Accepted:
+            return
+        updates = dlg.values()
+        if not updates:
+            self.statusBar().showMessage("No form field changes to apply.")
+            return
+        try:
+            tab.viewer.apply_form_updates(updates)
+        except Exception as e:
+            logger.exception("Failed to apply PDF form updates")
+            QMessageBox.critical(self, "Error",
+                                 f"Failed to update form fields:\n{e}")
+            return
+        self.statusBar().showMessage(
+            "Form fields updated. Use File > Save As to share the filled copy.")
 
     def sign_pdf(self):
         tab = self.current_tab()

@@ -9,8 +9,10 @@ from collections import OrderedDict
 import fitz  # PyMuPDF
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QScrollArea, QPushButton, QSpinBox)
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont
+                             QScrollArea, QPushButton, QSpinBox, QMenu,
+                             QApplication, QToolTip)
+from PyQt5.QtGui import (QPixmap, QImage, QPainter, QPen, QColor, QFont,
+                         QKeySequence, QCursor)
 from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPointF, QPoint
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,10 @@ class PageView(QWidget):
     position_changed = pyqtSignal(float, float)  # top-left of box, image px
     signature_clicked = pyqtSignal(str)          # field name of existing sig
     ctrl_wheel_zoomed = pyqtSignal(int, QPoint)  # wheel delta, pos in widget
+    object_inspect_requested = pyqtSignal(float, float)  # image px
+    selection_changed = pyqtSignal(QRectF)       # marquee, unzoomed px
+    copy_requested = pyqtSignal()
+    copy_page_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -40,10 +46,17 @@ class PageView(QWidget):
         self.placement_enabled = False  # signing mode: show/move the box
         self.sig_areas = []           # [(QRectF px, field_name)] existing sigs
         self.highlights = []          # [QRectF], unzoomed image px
+        self.object_highlight = None  # QRectF px selected by object inspector
         self.current_highlight = -1   # index into highlights
+        self.word_boxes = []          # [QRectF px] text words (for cursor)
+        self.selected_word_rects = []  # [QRectF px] current text selection
+        self.sel_marquee = None       # QRectF px while dragging a selection
+        self._selecting = False
+        self._sel_anchor = QPointF()
         self._dragging = False
         self._drag_offset = QPointF()
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.ClickFocus)
         self.setCursor(Qt.ArrowCursor)
 
     # --- page / zoom ---
@@ -78,6 +91,10 @@ class PageView(QWidget):
         self.current_highlight = current
         self.update()
 
+    def set_object_highlight(self, rect):
+        self.object_highlight = rect
+        self.update()
+
     def _clamped(self, rect):
         if not self.base_pixmap:
             return rect
@@ -104,11 +121,24 @@ class PageView(QWidget):
 
         p = self._to_image(event.pos())
 
-        # clicking an existing signature opens its details (reading mode)
+        if (event.modifiers() & Qt.ControlModifier
+                and event.modifiers() & Qt.AltModifier):
+            self.object_inspect_requested.emit(p.x(), p.y())
+            return
+
+        # reading mode: signature click, or start a text selection
         if not self.placement_enabled:
             field_name = self._sig_area_at(p)
             if field_name is not None:
                 self.signature_clicked.emit(field_name)
+                return
+            self.setFocus()
+            self._selecting = True
+            self._sel_anchor = p
+            self.sel_marquee = None
+            self.selected_word_rects = []
+            self.selection_changed.emit(QRectF())  # clear previous selection
+            self.update()
             return
 
         if not self.sig_rect:
@@ -130,9 +160,19 @@ class PageView(QWidget):
             return
 
         if not self.placement_enabled:
-            # hand cursor over clickable existing signatures
-            over_sig = self._sig_area_at(self._to_image(event.pos()))
-            self.setCursor(Qt.PointingHandCursor if over_sig else Qt.ArrowCursor)
+            p = self._to_image(event.pos())
+            if self._selecting and (event.buttons() & Qt.LeftButton):
+                self.sel_marquee = QRectF(self._sel_anchor, p).normalized()
+                self.selection_changed.emit(self.sel_marquee)
+                self.update()
+                return
+            # cursor: hand over signatures, I-beam over text
+            if self._sig_area_at(p) is not None:
+                self.setCursor(Qt.PointingHandCursor)
+            elif any(r.contains(p) for r in self.word_boxes):
+                self.setCursor(Qt.IBeamCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
             return
 
         if not self.sig_rect:
@@ -151,6 +191,34 @@ class PageView(QWidget):
 
     def mouseReleaseEvent(self, event):
         self._dragging = False
+        if self._selecting:
+            self._selecting = False
+            self.sel_marquee = None  # keep word highlights, drop the marquee
+            self.update()
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.Copy):
+            self.copy_requested.emit()
+        elif event.key() == Qt.Key_Escape and self.selected_word_rects:
+            self.selected_word_rects = []
+            self.sel_marquee = None
+            self.selection_changed.emit(QRectF())
+            self.update()
+        else:
+            super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event):
+        if self.placement_enabled or not self.base_pixmap:
+            return
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy selected text\tCtrl+C")
+        copy_action.setEnabled(bool(self.selected_word_rects))
+        page_action = menu.addAction("Copy all page text")
+        chosen = menu.exec_(event.globalPos())
+        if chosen == copy_action:
+            self.copy_requested.emit()
+        elif chosen == page_action:
+            self.copy_page_requested.emit()
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
@@ -185,6 +253,23 @@ class PageView(QWidget):
                 painter.setBrush(QColor(250, 204, 21, 100))
             painter.drawRect(r)
 
+        # text selection
+        if self.selected_word_rects:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(37, 99, 235, 70))
+            for rect in self.selected_word_rects:
+                painter.drawRect(self._zoomed(rect))
+        if self.sel_marquee:
+            painter.setPen(QPen(QColor(37, 99, 235, 170), 1, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self._zoomed(self.sel_marquee))
+
+        # object inspector highlight
+        if self.object_highlight:
+            painter.setPen(QPen(QColor(124, 58, 237), 3, Qt.DashLine))
+            painter.setBrush(QColor(124, 58, 237, 45))
+            painter.drawRect(self._zoomed(self.object_highlight))
+
         # signature box (only while in signing mode)
         if self.sig_rect and self.placement_enabled:
             r = self._zoomed(self.sig_rect)
@@ -212,6 +297,7 @@ class PDFViewer(QWidget):
     position_changed = pyqtSignal(float, float)   # x_pt, y_pt (from top-left)
     page_changed = pyqtSignal(int, int)           # current (0-based), total
     signature_clicked = pyqtSignal(str)           # existing sig field name
+    object_inspected = pyqtSignal(dict)           # Ctrl+Alt+Click details
 
     ZOOM_MIN, ZOOM_MAX, ZOOM_STEP = 0.25, 3.0, 0.25
 
@@ -224,6 +310,8 @@ class PDFViewer(QWidget):
         self._cache = OrderedDict()   # page -> QPixmap
         self.matches = []             # [(page, fitz.Rect)]
         self.current_match = -1
+        self.selected_text = ""
+        self._page_words = []         # fitz words of the current page
         self.init_ui()
 
     def init_ui(self):
@@ -280,12 +368,26 @@ class PDFViewer(QWidget):
         fit_p.clicked.connect(self.fit_page)
         nav.addWidget(fit_p)
 
+        rotate_left = QPushButton("Rotate left")
+        rotate_left.setToolTip("Rotate current page left")
+        rotate_left.clicked.connect(lambda: self.rotate_current_page(-90))
+        nav.addWidget(rotate_left)
+
+        rotate_right = QPushButton("Rotate right")
+        rotate_right.setToolTip("Rotate current page right")
+        rotate_right.clicked.connect(lambda: self.rotate_current_page(90))
+        nav.addWidget(rotate_right)
+
         layout.addLayout(nav)
 
         self.page_view = PageView()
         self.page_view.position_changed.connect(self._on_view_position)
         self.page_view.signature_clicked.connect(self.signature_clicked.emit)
         self.page_view.ctrl_wheel_zoomed.connect(self._on_ctrl_wheel)
+        self.page_view.object_inspect_requested.connect(self.inspect_object_at)
+        self.page_view.selection_changed.connect(self._on_selection_changed)
+        self.page_view.copy_requested.connect(self.copy_selection)
+        self.page_view.copy_page_requested.connect(self.copy_page_text)
 
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.page_view)
@@ -341,9 +443,234 @@ class PDFViewer(QWidget):
         self.current_page = page_num
         self.page_view.set_page(self._render(page_num))
         self.page_view.sig_areas = self._sig_areas_for(page_num)
+        self.page_view.set_object_highlight(None)
+        self._load_page_words(page_num)
+        self._clear_selection()
         self._apply_highlights()
         self._update_nav()
         self.page_changed.emit(self.current_page, self.total_pages)
+
+    def rotate_current_page(self, delta):
+        if not self.doc:
+            return
+        page = self.doc[self.current_page]
+        page.set_rotation((page.rotation + delta) % 360)
+        self._cache.pop(self.current_page, None)
+        self.show_page(self.current_page)
+
+    def save_as(self, output_path):
+        if not self.doc:
+            return
+        self.doc.save(output_path, garbage=4, deflate=True)
+
+    # --- form fields ---
+
+    def form_fields(self):
+        if not self.doc:
+            return []
+        fields = []
+        for page_num in range(self.total_pages):
+            try:
+                widgets = self.doc[page_num].widgets() or []
+            except Exception:
+                logger.debug("Could not enumerate widgets on page %d",
+                             page_num, exc_info=True)
+                continue
+            for widget in widgets:
+                if widget.field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE:
+                    continue
+                fields.append({
+                    "page": page_num,
+                    "xref": getattr(widget, "xref", 0),
+                    "name": widget.field_name or f"field-{getattr(widget, 'xref', '')}",
+                    "type": widget.field_type,
+                    "type_name": widget.field_type_string or str(widget.field_type),
+                    "value": str(widget.field_value or ""),
+                })
+        return fields
+
+    def apply_form_updates(self, updates):
+        if not self.doc:
+            return
+        touched_pages = set()
+        for field, value in updates:
+            page_num = field["page"]
+            for widget in self.doc[page_num].widgets() or []:
+                if getattr(widget, "xref", None) == field["xref"]:
+                    widget.field_value = value
+                    widget.update()
+                    touched_pages.add(page_num)
+                    break
+        for page_num in touched_pages:
+            self._cache.pop(page_num, None)
+        self.show_page(self.current_page)
+
+    # --- object inspector ---
+
+    def inspect_object_at(self, x_px, y_px):
+        details = self._object_details_at(x_px / PX_PER_PT, y_px / PX_PER_PT)
+        highlight = details.get("highlight_px")
+        self.page_view.set_object_highlight(highlight)
+        self.object_inspected.emit(details)
+
+    def _object_details_at(self, x_pt, y_pt):
+        page = self.doc[self.current_page]
+        point = fitz.Point(x_pt, y_pt)
+        base = {
+            "kind": "Page",
+            "page": self.current_page + 1,
+            "point": f"{x_pt:.2f}, {y_pt:.2f} pt",
+            "page_xref": page.xref,
+            "content_xrefs": ", ".join(str(x) for x in page.get_contents()) or "none",
+            "highlight_px": QRectF(0, 0, page.rect.width * PX_PER_PT,
+                                   page.rect.height * PX_PER_PT),
+        }
+
+        for widget in page.widgets() or []:
+            if widget.rect.contains(point):
+                return {
+                    **base,
+                    "kind": "Widget",
+                    "xref": getattr(widget, "xref", ""),
+                    "field_name": widget.field_name or "",
+                    "field_type": widget.field_type_string or widget.field_type,
+                    "value": str(widget.field_value or ""),
+                    "rect": str(widget.rect),
+                    "highlight_px": self._rect_to_px(widget.rect),
+                }
+
+        annot = page.first_annot
+        while annot:
+            if annot.rect.contains(point):
+                return {
+                    **base,
+                    "kind": "Annotation",
+                    "xref": annot.xref,
+                    "type": annot.type[1],
+                    "content": annot.info.get("content", ""),
+                    "rect": str(annot.rect),
+                    "highlight_px": self._rect_to_px(annot.rect),
+                }
+            annot = annot.next
+
+        for img in page.get_images(full=True):
+            xref = img[0]
+            for rect in page.get_image_rects(xref):
+                if rect.contains(point):
+                    return {
+                        **base,
+                        "kind": "Image",
+                        "xref": xref,
+                        "width": img[2],
+                        "height": img[3],
+                        "colorspace": img[5],
+                        "rect": str(rect),
+                        "highlight_px": self._rect_to_px(rect),
+                    }
+
+        for rect, text in self._text_blocks():
+            if rect.contains(point):
+                return {
+                    **base,
+                    "kind": "Text block",
+                    "xref": "content stream",
+                    "text": text[:500],
+                    "rect": str(rect),
+                    "highlight_px": self._rect_to_px(rect),
+                }
+
+        for drawing in page.get_drawings():
+            rect = drawing.get("rect")
+            if rect and rect.contains(point):
+                return {
+                    **base,
+                    "kind": "Drawing/path",
+                    "xref": "content stream",
+                    "items": len(drawing.get("items", [])),
+                    "rect": str(rect),
+                    "highlight_px": self._rect_to_px(rect),
+                }
+        return base
+
+    def _text_blocks(self):
+        blocks = []
+        for block in self.doc[self.current_page].get_text("blocks"):
+            if len(block) >= 5 and block[4].strip():
+                blocks.append((fitz.Rect(block[:4]), block[4].strip()))
+        return blocks
+
+    def _rect_to_px(self, rect):
+        return QRectF(rect.x0 * PX_PER_PT, rect.y0 * PX_PER_PT,
+                      rect.width * PX_PER_PT, rect.height * PX_PER_PT)
+
+    def _load_page_words(self, page_num):
+        try:
+            self._page_words = self.doc[page_num].get_text("words")
+        except Exception:
+            logger.debug("Cannot extract words on page %d", page_num,
+                         exc_info=True)
+            self._page_words = []
+        self.page_view.word_boxes = [
+            QRectF(w[0] * PX_PER_PT, w[1] * PX_PER_PT,
+                   (w[2] - w[0]) * PX_PER_PT, (w[3] - w[1]) * PX_PER_PT)
+            for w in self._page_words]
+
+    # --- text selection ---
+
+    def _clear_selection(self):
+        self.selected_text = ""
+        self.page_view.selected_word_rects = []
+        self.page_view.sel_marquee = None
+        self.page_view.update()
+
+    def _on_selection_changed(self, marquee_px):
+        if marquee_px.isNull() or marquee_px.isEmpty():
+            self._clear_selection()
+            return
+
+        marquee_pt = QRectF(marquee_px.x() / PX_PER_PT,
+                            marquee_px.y() / PX_PER_PT,
+                            marquee_px.width() / PX_PER_PT,
+                            marquee_px.height() / PX_PER_PT)
+
+        # words are (x0, y0, x1, y1, text, block, line, word_no)
+        selected, rects = [], []
+        for w in self._page_words:
+            rect = QRectF(w[0], w[1], w[2] - w[0], w[3] - w[1])
+            if rect.intersects(marquee_pt):
+                selected.append(w)
+                rects.append(QRectF(w[0] * PX_PER_PT, w[1] * PX_PER_PT,
+                                    (w[2] - w[0]) * PX_PER_PT,
+                                    (w[3] - w[1]) * PX_PER_PT))
+
+        lines = {}
+        for w in selected:
+            lines.setdefault((w[5], w[6]), []).append(w)
+        parts = []
+        for key in sorted(lines):
+            words = sorted(lines[key], key=lambda w: w[7])
+            parts.append(" ".join(w[4] for w in words))
+        self.selected_text = "\n".join(parts)
+
+        self.page_view.selected_word_rects = rects
+        self.page_view.update()
+
+    def copy_selection(self):
+        if self.selected_text:
+            QApplication.clipboard().setText(self.selected_text)
+            QToolTip.showText(QCursor.pos(),
+                              f"Copied {len(self.selected_text)} characters",
+                              self.page_view)
+
+    def copy_page_text(self):
+        if not self.doc:
+            return
+        text = self.doc[self.current_page].get_text().strip()
+        if text:
+            QApplication.clipboard().setText(text)
+            QToolTip.showText(QCursor.pos(),
+                              f"Copied page {self.current_page + 1} text "
+                              f"({len(text)} characters)", self.page_view)
 
     def _sig_areas_for(self, page_num):
         """Rectangles (unzoomed px) of signature widgets on a page."""

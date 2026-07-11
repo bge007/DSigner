@@ -1,11 +1,20 @@
 """
 DSigner - Main Application Entry Point
+
+Application: DSigner
+Version: 0.2.0
+Publisher: BGE
+Organised by: Benoy George
+License: MIT
+Purpose: Read, inspect, and digitally sign PDF documents with certificates
+from the Windows Certificate Store.
 """
 import ctypes
 import sys
 import os
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QIcon
+from core.app_info import APP_ID, APP_NAME, APP_VERSION
 from core.logging_setup import setup_logging
 from core.resources import resource_path
 from ui.main_window import MainWindow
@@ -108,11 +117,13 @@ def main():
 
     # give the app its own taskbar identity/icon on Windows
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("BGE.DSigner")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     except Exception:
         pass
 
     app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
     app.setStyleSheet(APP_STYLE)
     app.setWindowIcon(QIcon(resource_path("assets/logo.png")))
     window = MainWindow()

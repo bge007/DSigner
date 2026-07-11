@@ -1,0 +1,13 @@
+
+TODO
+- DONE: Add feature for inspecting the PDF file, Ctrl+Alt+Click - Show PDF Object ID and highlight the object visibilty
+- DONE: Add feature for filling a PDF form and save and share with others
+- DONE: Add release version number and include the version also into the exe file name
+- DONE: Add orientation rotate left and rotate right button next to the page number navigator
+- DONE: An option for showing files metadata information (All file properties)
+- DONE: Add MIT LICENSE file
+- DONE: File menu with File Open, File Close, File Save As, File Properties, Help and About, About window with Application details, MIT License, Organised by Benoy George, Version No.
+- DONE: background logo in the Sign can be increase 50% transparency shade. 
+- DONE: Include all these meta information in the header of the main entry point file in comments section
+- update masterprompt and github updates with the latest release version upload if permitted
+- 
