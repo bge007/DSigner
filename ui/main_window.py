@@ -187,6 +187,20 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+S"), self, self._sign_shortcut)
         QShortcut(QKeySequence("Ctrl+W"), self,
                   lambda: self.close_tab(self.tabs.currentIndex()))
+        QShortcut(QKeySequence.ZoomIn, self, lambda: self._zoom_current(+1))
+        QShortcut(QKeySequence("Ctrl+="), self, lambda: self._zoom_current(+1))
+        QShortcut(QKeySequence.ZoomOut, self, lambda: self._zoom_current(-1))
+        QShortcut(QKeySequence("Ctrl+0"), self, self._fit_current)
+
+    def _zoom_current(self, direction):
+        tab = self.current_tab()
+        if tab:
+            (tab.viewer.zoom_in if direction > 0 else tab.viewer.zoom_out)()
+
+    def _fit_current(self):
+        tab = self.current_tab()
+        if tab:
+            tab.viewer.fit_width()
 
     def _sign_shortcut(self):
         if not self.sign_mode_btn.isChecked():

@@ -39,7 +39,9 @@ leave the page; errors land in `error.log`.
 > poppler). Render pages lazily with an LRU cache (~8 pages) so large
 > documents open instantly. Add page-view controls: previous/next buttons,
 > a jump-to-page spinbox with "/ N" total, zoom in/out with percentage
-> label, **Fit width** and **Fit page**. Add **text search**: a search box
+> label, **Fit width** and **Fit page**; support **Ctrl+Scroll** zooming
+> anchored at the cursor position, plus **Ctrl +/−** and **Ctrl+0**
+> (fit width) shortcuts, clamped to 25%–300%. Add **text search**: a search box
 > (Ctrl+F) that finds every match across all pages using PyMuPDF's
 > `search_for` rectangles; highlight all matches on the visible page in
 > yellow with the current match emphasized in orange; Enter/▼ and ▲ cycle

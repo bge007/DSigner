@@ -11,7 +11,9 @@ validates.
 - **Tabbed viewer** — open multiple PDFs at once; tabs are closable and reorderable
 - **Session restore** — reopens your files, pages, zoom and signature placement on next launch
 - **Text search** — find matches across all pages with highlights and next/previous navigation
-- **Page controls** — page jump, previous/next, zoom in/out, fit width, fit page
+- **Page controls** — page jump, previous/next, fit width, fit page
+- **Zoom** — toolbar buttons, **Ctrl+Scroll** (zooms at the cursor),
+  **Ctrl +/−** keyboard shortcuts, **Ctrl+0** for fit width (25%–300%)
 - **Interactive placement** — click the page to place the signature box, drag to fine-tune
 - **Real digital signatures** — pick a certificate from the Windows store
   (Current User → Personal); signing happens inside Windows CNG, so

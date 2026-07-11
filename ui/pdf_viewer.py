@@ -11,7 +11,7 @@ import fitz  # PyMuPDF
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QScrollArea, QPushButton, QSpinBox)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPointF
+from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPointF, QPoint
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class PageView(QWidget):
     """
     position_changed = pyqtSignal(float, float)  # top-left of box, image px
     signature_clicked = pyqtSignal(str)          # field name of existing sig
+    ctrl_wheel_zoomed = pyqtSignal(int, QPoint)  # wheel delta, pos in widget
 
     def __init__(self):
         super().__init__()
@@ -151,6 +152,13 @@ class PageView(QWidget):
     def mouseReleaseEvent(self, event):
         self._dragging = False
 
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            self.ctrl_wheel_zoomed.emit(event.angleDelta().y(), event.pos())
+            event.accept()
+        else:
+            event.ignore()  # let the scroll area scroll normally
+
     # --- painting ---
 
     def _zoomed(self, rect):
@@ -249,7 +257,8 @@ class PDFViewer(QWidget):
 
         zoom_out = QPushButton("−")
         zoom_out.setFixedWidth(34)
-        zoom_out.clicked.connect(lambda: self.set_zoom(self.zoom - self.ZOOM_STEP))
+        zoom_out.setToolTip("Zoom out (Ctrl+-, Ctrl+Scroll)")
+        zoom_out.clicked.connect(self.zoom_out)
         nav.addWidget(zoom_out)
 
         self.zoom_label = QLabel("100%")
@@ -259,7 +268,8 @@ class PDFViewer(QWidget):
 
         zoom_in = QPushButton("+")
         zoom_in.setFixedWidth(34)
-        zoom_in.clicked.connect(lambda: self.set_zoom(self.zoom + self.ZOOM_STEP))
+        zoom_in.setToolTip("Zoom in (Ctrl++, Ctrl+Scroll)")
+        zoom_in.clicked.connect(self.zoom_in)
         nav.addWidget(zoom_in)
 
         fit_w = QPushButton("Fit width")
@@ -275,6 +285,7 @@ class PDFViewer(QWidget):
         self.page_view = PageView()
         self.page_view.position_changed.connect(self._on_view_position)
         self.page_view.signature_clicked.connect(self.signature_clicked.emit)
+        self.page_view.ctrl_wheel_zoomed.connect(self._on_ctrl_wheel)
 
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.page_view)
@@ -370,6 +381,41 @@ class PDFViewer(QWidget):
         self.zoom = max(self.ZOOM_MIN, min(self.ZOOM_MAX, zoom))
         self.page_view.set_zoom(self.zoom)
         self.zoom_label.setText(f"{self.zoom * 100:.0f}%")
+
+    def zoom_in(self):
+        self._anchored_zoom(self.zoom + self.ZOOM_STEP)
+
+    def zoom_out(self):
+        self._anchored_zoom(self.zoom - self.ZOOM_STEP)
+
+    def _anchored_zoom(self, new_zoom, anchor=None):
+        """Zoom while keeping the document point under `anchor`
+        (viewport coordinates; defaults to the center) in place."""
+        new_zoom = max(self.ZOOM_MIN, min(self.ZOOM_MAX, new_zoom))
+        old_zoom = self.zoom
+        if not self.page_view.base_pixmap or abs(new_zoom - old_zoom) < 1e-9:
+            self.set_zoom(new_zoom)
+            return
+
+        viewport = self.scroll.viewport()
+        if anchor is None:
+            anchor = QPoint(viewport.width() // 2, viewport.height() // 2)
+
+        in_widget = self.page_view.mapFrom(viewport, anchor)
+        doc_x = in_widget.x() / old_zoom
+        doc_y = in_widget.y() / old_zoom
+
+        self.set_zoom(new_zoom)
+
+        self.scroll.horizontalScrollBar().setValue(
+            round(doc_x * self.zoom - anchor.x()))
+        self.scroll.verticalScrollBar().setValue(
+            round(doc_y * self.zoom - anchor.y()))
+
+    def _on_ctrl_wheel(self, delta, widget_pos):
+        factor = 1.1 ** (delta / 120.0)  # one notch = 10%
+        anchor = self.page_view.mapTo(self.scroll.viewport(), widget_pos)
+        self._anchored_zoom(self.zoom * factor, anchor)
 
     def fit_width(self):
         if self.page_view.base_pixmap:
