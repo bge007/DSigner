@@ -12,7 +12,7 @@ if not exist "venv\Scripts\pyinstaller.exe" (
     venv\Scripts\pip.exe install pyinstaller
 )
 
-venv\Scripts\pyinstaller.exe --noconfirm --clean --onefile --windowed --name "%EXE_NAME%" main.py
+venv\Scripts\pyinstaller.exe --noconfirm --clean --onefile --windowed --name "%EXE_NAME%" --icon "assets\logo.ico" --add-data "assets;assets" main.py
 if errorlevel 1 (
     echo.
     echo Build FAILED - check the PyInstaller output above.

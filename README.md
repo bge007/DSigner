@@ -17,8 +17,12 @@ validates.
   (Current User → Personal); signing happens inside Windows CNG, so
   non-exportable keys, smartcards and USB-token DSCs all work, with the
   provider's own PIN prompt when required
-- **Visible signature stamp** — signer name, date, reason and location drawn
-  on the chosen page at the chosen position
+- **Visible signature stamp** — signer name, organization, date, reason and
+  location drawn at the chosen position, with the DSigner logo as a light
+  background watermark
+- **Signature inspector** — click any signature on the page to review it:
+  integrity check (intact / modified), certificate subject, issuer, serial,
+  validity, SHA-256 fingerprint, key type and the public key as copyable PEM
 
 ## Project Structure
 

@@ -7,6 +7,7 @@ core.wincert, so non-exportable keys and USB tokens work.
 """
 import hashlib
 import logging
+import os
 import time
 import warnings
 from datetime import datetime
@@ -22,6 +23,7 @@ from pyhanko.sign import fields, signers
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 
 from core import wincert
+from core.resources import resource_path
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +103,22 @@ def sign_pdf_with_certificate(input_pdf, output_pdf, win_cert, page_index,
         location=location or None,
         md_algorithm="sha256",
     )
+    # light DSigner logo as the stamp's background watermark
+    background = None
+    logo_path = resource_path("assets/logo_light.png")
+    if os.path.exists(logo_path):
+        try:
+            from pyhanko.pdf_utils.images import PdfImage
+            background = PdfImage(logo_path)
+        except Exception:
+            logger.exception("Could not load stamp background image")
+
     style = stamp.TextStampStyle(
         stamp_text=stamp_text,
         border_width=1,
         text_box_style=text.TextBoxStyle(font_size=8),
+        background=background,
+        background_opacity=0.30,
     )
     pdf_signer = signers.PdfSigner(
         meta, signer=signer, stamp_style=style,
@@ -162,4 +176,76 @@ def read_signatures(pdf_path):
                 })
     except Exception:
         logger.exception("Failed to read signatures from %s", pdf_path)
+    return results
+
+
+def signature_details(pdf_path):
+    """Full review data for every signature in a PDF: signer, certificate,
+    public key (PEM), fingerprints, and an integrity check."""
+    from pyhanko.pdf_utils.reader import PdfFileReader
+    from pyhanko.sign.validation import validate_pdf_signature
+    from pyhanko_certvalidator import ValidationContext
+    from cryptography.hazmat.primitives import hashes as crypto_hashes
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+
+    results = []
+    try:
+        with open(pdf_path, "rb") as f:
+            reader = PdfFileReader(f, strict=False)
+            for sig in reader.embedded_signatures:
+                obj = sig.sig_object
+                info = {
+                    "field": sig.field_name,
+                    "name": str(obj.get("/Name", "") or ""),
+                    "signed_at": _pdf_date_to_text(obj.get("/M")),
+                    "reason": str(obj.get("/Reason", "") or ""),
+                    "location": str(obj.get("/Location", "") or ""),
+                    "subject": "", "issuer": "", "serial": "",
+                    "valid_from": "", "valid_to": "", "key_info": "",
+                    "sig_algorithm": "", "sha256_fp": "", "pubkey_pem": "",
+                    "intact": None, "valid_crypto": None,
+                }
+
+                try:
+                    der = sig.signer_cert.dump()
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        cert = crypto_x509.load_der_x509_certificate(der)
+                        info["subject"] = cert.subject.rfc4514_string()
+                        info["issuer"] = cert.issuer.rfc4514_string()
+                    info["serial"] = format(cert.serial_number, "X")
+                    info["valid_from"] = f"{cert.not_valid_before_utc:%Y-%m-%d}"
+                    info["valid_to"] = f"{cert.not_valid_after_utc:%Y-%m-%d}"
+                    info["sha256_fp"] = cert.fingerprint(
+                        crypto_hashes.SHA256()).hex(":").upper()
+                    info["sig_algorithm"] = cert.signature_algorithm_oid._name
+
+                    public_key = cert.public_key()
+                    if isinstance(public_key, rsa.RSAPublicKey):
+                        info["key_info"] = f"RSA, {public_key.key_size} bits"
+                    elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                        info["key_info"] = f"EC, curve {public_key.curve.name}"
+                    else:
+                        info["key_info"] = type(public_key).__name__
+                    info["pubkey_pem"] = public_key.public_bytes(
+                        serialization.Encoding.PEM,
+                        serialization.PublicFormat.SubjectPublicKeyInfo,
+                    ).decode()
+                except Exception:
+                    logger.exception("Cannot parse signer certificate for %s",
+                                     sig.field_name)
+
+                try:
+                    status = validate_pdf_signature(
+                        sig, ValidationContext(allow_fetching=False))
+                    info["intact"] = status.intact
+                    info["valid_crypto"] = status.valid
+                except Exception:
+                    logger.exception("Integrity check failed for %s",
+                                     sig.field_name)
+
+                results.append(info)
+    except Exception:
+        logger.exception("Failed to read signature details from %s", pdf_path)
     return results

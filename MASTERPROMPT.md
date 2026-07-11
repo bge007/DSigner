@@ -1,6 +1,6 @@
-# DSigner — 6-Step Master Prompt
+# DSigner — Master Prompt (7 Steps)
 
-A sequence of six prompts that rebuilds this project from an empty folder.
+A sequence of prompts that rebuilds this project from an empty folder.
 Feed them to an AI coding agent (or follow them yourself) one at a time —
 each step produces a working, testable application and the next step builds
 on it. Verify the acceptance criteria before moving on.
@@ -138,6 +138,36 @@ intact/valid/trusted.
 toggle reveals pane + placement box; signing opens the signed copy in a tab
 whose signature details display in the panel; a certificate created in the
 dialog immediately signs successfully.
+
+---
+
+## Step 7 — Branding, signature inspector, and portable packaging
+
+> Give the app an identity and a review workflow. Generate a **logo**
+> programmatically (script in `assets/`: rounded blue gradient badge, bold
+> white "D", amber handwritten swoosh) producing `logo.png`, a
+> light-palette `logo_light.png`, and a multi-size `logo.ico`. Use it as
+> the window/taskbar icon (set a Windows AppUserModelID so the taskbar
+> shows it) and embed the light variant as the **background watermark of
+> the visible signature stamp** (pyhanko `TextStampStyle(background=
+> PdfImage(...), background_opacity≈0.3)`). Make existing signatures
+> **clickable in the viewer**: hit-test PyMuPDF signature widgets
+> (`PDF_WIDGET_TYPE_SIGNATURE` rects) in reading mode with a pointing-hand
+> cursor, and open a details dialog showing integrity status (verified
+> with pyhanko: intact/modified), signer, date, reason, location,
+> certificate subject/issuer/serial/validity, SHA-256 fingerprint,
+> signature algorithm, key type and size, and the **public key as PEM**
+> with a copy button. Package everything as a portable single-file exe
+> with PyInstaller (`--onefile --windowed --icon assets\logo.ico
+> --add-data "assets;assets"`), using a `resource_path()` helper that
+> resolves assets from `sys._MEIPASS` when frozen, and writing logs to
+> `%LOCALAPPDATA%\DSigner` in that case. Open PDF writers with
+> `strict=False` so hybrid-xref documents (MS Word exports) sign cleanly.
+
+**Accept when:** the window and exe carry the logo; signed stamps show the
+light logo behind the text; clicking a signature on the page opens the
+inspector with a correct intact/modified verdict and a copyable public
+key; the exe runs on a machine without Python.
 
 ---
 

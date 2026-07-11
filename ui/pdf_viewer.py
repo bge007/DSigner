@@ -28,6 +28,7 @@ class PageView(QWidget):
     affects display.
     """
     position_changed = pyqtSignal(float, float)  # top-left of box, image px
+    signature_clicked = pyqtSignal(str)          # field name of existing sig
 
     def __init__(self):
         super().__init__()
@@ -36,6 +37,7 @@ class PageView(QWidget):
         self.sig_rect = None          # QRectF, unzoomed image px
         self.preview_name = ""
         self.placement_enabled = False  # signing mode: show/move the box
+        self.sig_areas = []           # [(QRectF px, field_name)] existing sigs
         self.highlights = []          # [QRectF], unzoomed image px
         self.current_highlight = -1   # index into highlights
         self._dragging = False
@@ -89,12 +91,27 @@ class PageView(QWidget):
 
     # --- interaction ---
 
+    def _sig_area_at(self, p):
+        for rect, field_name in self.sig_areas:
+            if rect.contains(p):
+                return field_name
+        return None
+
     def mousePressEvent(self, event):
-        if (not self.placement_enabled or event.button() != Qt.LeftButton
-                or not self.base_pixmap or not self.sig_rect):
+        if event.button() != Qt.LeftButton or not self.base_pixmap:
             return
 
         p = self._to_image(event.pos())
+
+        # clicking an existing signature opens its details (reading mode)
+        if not self.placement_enabled:
+            field_name = self._sig_area_at(p)
+            if field_name is not None:
+                self.signature_clicked.emit(field_name)
+            return
+
+        if not self.sig_rect:
+            return
         if self.sig_rect.contains(p):
             self._dragging = True
             self._drag_offset = p - self.sig_rect.topLeft()
@@ -108,7 +125,16 @@ class PageView(QWidget):
             self.position_changed.emit(self.sig_rect.x(), self.sig_rect.y())
 
     def mouseMoveEvent(self, event):
-        if not self.placement_enabled or not self.base_pixmap or not self.sig_rect:
+        if not self.base_pixmap:
+            return
+
+        if not self.placement_enabled:
+            # hand cursor over clickable existing signatures
+            over_sig = self._sig_area_at(self._to_image(event.pos()))
+            self.setCursor(Qt.PointingHandCursor if over_sig else Qt.ArrowCursor)
+            return
+
+        if not self.sig_rect:
             return
 
         p = self._to_image(event.pos())
@@ -177,6 +203,7 @@ class PDFViewer(QWidget):
     """
     position_changed = pyqtSignal(float, float)   # x_pt, y_pt (from top-left)
     page_changed = pyqtSignal(int, int)           # current (0-based), total
+    signature_clicked = pyqtSignal(str)           # existing sig field name
 
     ZOOM_MIN, ZOOM_MAX, ZOOM_STEP = 0.25, 3.0, 0.25
 
@@ -247,6 +274,7 @@ class PDFViewer(QWidget):
 
         self.page_view = PageView()
         self.page_view.position_changed.connect(self._on_view_position)
+        self.page_view.signature_clicked.connect(self.signature_clicked.emit)
 
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.page_view)
@@ -301,9 +329,27 @@ class PDFViewer(QWidget):
             return
         self.current_page = page_num
         self.page_view.set_page(self._render(page_num))
+        self.page_view.sig_areas = self._sig_areas_for(page_num)
         self._apply_highlights()
         self._update_nav()
         self.page_changed.emit(self.current_page, self.total_pages)
+
+    def _sig_areas_for(self, page_num):
+        """Rectangles (unzoomed px) of signature widgets on a page."""
+        areas = []
+        try:
+            for widget in self.doc[page_num].widgets() or []:
+                if widget.field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE:
+                    r = widget.rect
+                    areas.append((
+                        QRectF(r.x0 * PX_PER_PT, r.y0 * PX_PER_PT,
+                               (r.x1 - r.x0) * PX_PER_PT,
+                               (r.y1 - r.y0) * PX_PER_PT),
+                        widget.field_name or ""))
+        except Exception:
+            logger.debug("Could not enumerate widgets on page %d",
+                         page_num, exc_info=True)
+        return areas
 
     def _on_page_spin(self, value):
         if value - 1 != self.current_page:

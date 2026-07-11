@@ -16,8 +16,10 @@ from PyQt5.QtGui import QKeySequence
 from ui.document_tab import DocumentTab
 from ui.cert_dialog import CertificateDialog
 from ui.new_cert_dialog import NewCertificateDialog
+from ui.sig_details_dialog import SignatureDetailsDialog
 from core import session, wincert
-from core.certsigner import sign_pdf_with_certificate, read_signatures
+from core.certsigner import (sign_pdf_with_certificate, read_signatures,
+                             signature_details)
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +270,8 @@ class MainWindow(QMainWindow):
             lambda x, y, t=tab: self.on_position_changed(t, x, y))
         tab.viewer.page_changed.connect(
             lambda cur, tot, t=tab: self.on_page_changed(t, cur, tot))
+        tab.viewer.signature_clicked.connect(
+            lambda field, t=tab: self.show_signature_details(t, field))
 
         if self.selected_cert:
             tab.viewer.set_preview_name(self.selected_cert.subject)
@@ -315,6 +319,16 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         if tab:
             tab.focus_search()
+
+    def show_signature_details(self, tab, field_name):
+        details = signature_details(tab.path)
+        if not details:
+            QMessageBox.information(
+                self, "No details",
+                "Could not read signature details from this document.")
+            return
+        SignatureDetailsDialog(details, current_field=field_name,
+                               parent=self).exec_()
 
     # --- geometry sync ---
 

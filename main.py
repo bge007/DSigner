@@ -1,10 +1,13 @@
 """
 DSigner - Main Application Entry Point
 """
+import ctypes
 import sys
 import os
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtGui import QIcon
 from core.logging_setup import setup_logging
+from core.resources import resource_path
 from ui.main_window import MainWindow
 
 os.environ["QT_QPA_FONTDIR"] = ""
@@ -103,8 +106,15 @@ QHeaderView::section {
 def main():
     setup_logging()
 
+    # give the app its own taskbar identity/icon on Windows
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("BGE.DSigner")
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
     app.setStyleSheet(APP_STYLE)
+    app.setWindowIcon(QIcon(resource_path("assets/logo.png")))
     window = MainWindow()
     window.show()
     window.restore_session()

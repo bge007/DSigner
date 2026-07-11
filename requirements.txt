@@ -3,3 +3,4 @@ PyQt5-sip>=12.15.0
 PyMuPDF>=1.28.0
 pyhanko>=0.35.2
 cryptography>=48.0.0
+Pillow>=10.0.0
