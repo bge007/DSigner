@@ -1,30 +1,27 @@
 @echo off
-REM Build a portable single-file DSigner.exe into dist\
+REM Build a portable single-file timestamped DSigner exe into dist\
 REM Requires the venv with requirements installed (see README).
 
 cd /d "%~dp0"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Get-Process DSigner -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
-if not errorlevel 1 (
-    echo DSigner.exe is currently running. Close it before building.
-    exit /b 1
-)
+for /f %%I in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "BUILD_TIMESTAMP=%%I"
+set "EXE_NAME=DSigner_%BUILD_TIMESTAMP%"
 
 if not exist "venv\Scripts\pyinstaller.exe" (
     echo Installing PyInstaller...
     venv\Scripts\pip.exe install pyinstaller
 )
 
-venv\Scripts\pyinstaller.exe --noconfirm --clean --onefile --windowed --name DSigner main.py
+venv\Scripts\pyinstaller.exe --noconfirm --clean --onefile --windowed --name "%EXE_NAME%" main.py
 if errorlevel 1 (
     echo.
     echo Build FAILED - check the PyInstaller output above.
     exit /b 1
 )
 
-if exist "dist\DSigner.exe" (
+if exist "dist\%EXE_NAME%.exe" (
     echo.
-    echo Build complete: dist\DSigner.exe
+    echo Build complete: dist\%EXE_NAME%.exe
 ) else (
     echo.
     echo Build FAILED - check the output above.

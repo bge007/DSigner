@@ -113,7 +113,9 @@ def sign_pdf_with_certificate(input_pdf, output_pdf, win_cert, page_index,
     )
 
     with open(input_pdf, "rb") as inf:
-        writer = IncrementalPdfFileWriter(inf)
+        # strict=False accepts real-world files: hybrid cross-reference
+        # tables (e.g. PDFs exported by MS Word) and minor spec deviations
+        writer = IncrementalPdfFileWriter(inf, strict=False)
         with open(output_pdf, "wb") as outf:
             pdf_signer.sign_pdf(writer, output=outf)
 
