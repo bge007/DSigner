@@ -1,0 +1,15 @@
+TODO
+- DONE: Add feature for filling a PDF form and save and share with others
+- DONE: Add release version number and include the version also into the exe file name
+- DONE: Add orientation rotate left and rotate right button next to the page number navigator
+- DONE: An option for showing files metadata information (All file properties)
+- DONE: Add MIT LICENSE file
+- DONE: File menu with File Open, File Close, File Save As, File Properties, Help and About, About window with Application details, MIT License, Organised by Benoy George, Version No.
+- DONE: background logo in the Sign can be increase 50% transparency shade.
+- DONE: Include all these meta information in the header of the main entry point file in comments section
+- DONE: Audio read-aloud feature in the toolbar (Read Aloud button + Ctrl+R; reads selection or whole page via Windows speech engine; click again to stop)
+- DONE: Add Ctrl+Alt+Click object inspection in the viewer: highlight the detected visible object and show the best available xref details for widgets, annotations, images, text blocks, drawings, or the page/content stream.
+- DONE: Remove all previous stale information from the reporsitory including from .git history and maintain the current license fixed version as initial version.
+- DONE: ensure Signature placement box is in the visible area of the file while initially displaying e.g X axis 25pt, Y axis 25pt from top left.
+- DONE: Highlight the selected Certificate row in the "Choose Signing Certificate" window which helps identifying the selected Digital Certificate.
+- DONE: update masterprompt and github updates with the latest release version

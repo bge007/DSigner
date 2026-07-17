@@ -1,0 +1,6 @@
+PySide6-Essentials>=6.7
+pypdfium2>=5.0
+pypdf>=4.0
+pyhanko>=0.35.2
+cryptography>=48.0.0
+Pillow>=10.0.0
